@@ -6,35 +6,42 @@ import com.sun.jna.Pointer;
 import io.chubao.fs.CfsLibrary.Dirent;
 import io.chubao.fs.CfsLibrary.DirentArray;
 
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.util.ArrayList;
+
 public class CfsMount {
     // Open flags
-    public final int O_RDONLY = 0;
-    public final int O_WRONLY = 1;
-    public final int O_RDWR = 2;
-    public final int O_ACCMODE = 3;
-    public final int O_CREAT = 0100;
-    public final int O_TRUNC = 01000;
-    public final int O_APPEND = 02000;
-    public final int O_DIRECT = 040000;
+    public static final int O_RDONLY = 0;
+    public static final int O_WRONLY = 1;
+    public static final int O_RDWR = 2;
+    public static final int O_ACCMODE = 3;
+    public static final int O_CREAT = 0100;
+    public static final int O_TRUNC = 01000;
+    public static final int O_APPEND = 02000;
+    public static final int O_DIRECT = 040000;
 
     // Mode
-    public final int S_IFDIR = 0040000;
-    public final int S_IFREG = 0100000;
-    public final int S_IFLNK = 0120000;
+    public static final int S_IFDIR = 0040000;
+    public static final int S_IFREG = 0100000;
+    public static final int S_IFLNK = 0120000;
 
     // dType used in Dirent
-    public final int DT_UNKNOWN = 0x0;
-    public final int DT_DIR = 0x4;
-    public final int DT_REG = 0x8;
-    public final int DT_LNK = 0xa;
+    public static final int DT_UNKNOWN = 0x0;
+    public static final int DT_DIR = 0x4;
+    public static final int DT_REG = 0x8;
+    public static final int DT_LNK = 0xa;
 
     // Valid flags for setattr
     // Must be compatible with proto.Attr values
-    public final int SETATTR_MODE = 1;
-    public final int SETATTR_UID = 2;
-    public final int SETATTR_GID = 4;
-    public final int SETATTR_MTIME = 8;
-    public final int SETATTR_ATIME = 16;
+    public static final int SETATTR_MODE = 1;
+    public static final int SETATTR_UID = 2;
+    public static final int SETATTR_GID = 4;
+    public static final int SETATTR_MTIME = 8;
+    public static final int SETATTR_ATIME = 16;
+
+    //success single
+    public static final int SUCCESS = 0;
 
     private CfsLibrary libcfs;
     private String libpath;
@@ -66,16 +73,28 @@ public class CfsMount {
         return libcfs.cfs_getcwd(this.cid);
     }
 
-    public int getAttr(String path, CfsLibrary.StatInfo stat) {
-        return libcfs.cfs_getattr(this.cid, path, stat);
+    public int getAttr(String path, CfsLibrary.StatInfo stat) throws FileNotFoundException {
+        int result = libcfs.cfs_getattr(this.cid, path, stat);
+        if (result != SUCCESS) {
+            throw new FileNotFoundException("getAttr failed :" + path + " code : " + result);
+        }
+        return result;
     }
 
-    public int setAttr(String path, CfsLibrary.StatInfo stat, int mask) {
-        return libcfs.cfs_setattr(this.cid, path, stat, mask);
+    public int setAttr(String path, CfsLibrary.StatInfo stat, int mask) throws FileNotFoundException {
+        int result = libcfs.cfs_setattr(this.cid, path, stat, mask);
+        if (result != SUCCESS) {
+            throw new FileNotFoundException("setAttr failed : " + path + " code : " + result);
+        }
+        return result;
     }
 
-    public int open(String path, int flags, int mode) {
-        return libcfs.cfs_open(this.cid, path, flags, mode);
+    public int open(String path, int flags, int mode) throws FileNotFoundException {
+        int result = libcfs.cfs_open(this.cid, path, flags, mode);
+        if (result < 0) {
+            throw new FileNotFoundException("open failed : " + path + " code : " + result);
+        }
+        return result;
     }
 
     public void close(int fd) {
@@ -112,23 +131,74 @@ public class CfsMount {
         return (int) arrSize;
     }
 
-    public int mkdirs(String path, int mode) {
-        return libcfs.cfs_mkdirs(this.cid, path, mode);
+    public Dirent[] listdir(String dir) throws FileNotFoundException {
+        //Modify cwd to the target path
+        int result = chdir(dir);
+        if (result != SUCCESS) {
+            throw new FileNotFoundException("can't find valid path : " + dir + " code : " + result);
+        }
+        int fd = open(".", CfsMount.O_RDWR, 0644);
+        //dents is used to store the cyclically read dent
+        ArrayList<Dirent> dents = new ArrayList<Dirent>();
+        for (; ; ) {
+            Dirent dent = new Dirent();
+            //temp store the dent read by each readdir
+            Dirent[] temp = (Dirent[]) dent.toArray(2);
+            int n = readdir(fd, temp, 2);
+            if (n == 0) {
+                break;
+            } else if (n < 0) {
+                throw new FileNotFoundException("read dir fail: " + dir);
+            }
+            for (int i = 0; i < n; i++) {
+                dents.add(temp[i]);
+            }
+        }
+        close(fd);
+        //Modify the cwd to /
+        int result2 = chdir("/");
+        if (result2 != SUCCESS) {
+            throw new FileNotFoundException("can't find valid path : " + dir + " code : " + result2);
+        }
+        //Convert the Arraylist type to Dirent[] type
+        Dirent[] list = dents.toArray(new Dirent[dents.size()]);
+        return list;
     }
 
-    public int rmdir(String path) {
-        return libcfs.cfs_rmdir(this.cid, path);
+    public int mkdirs(String path, int mode) throws IOException {
+        int result = libcfs.cfs_mkdirs(this.cid, path, mode);
+        if (result != SUCCESS) {
+            throw new IOException("mkdirs failed : " + path + " code : " + result);
+        }
+        return result;
     }
 
-    public int unlink(String path) {
-        return libcfs.cfs_unlink(this.cid, path);
+    public int rmdir(String path) throws FileNotFoundException {
+        int result = libcfs.cfs_rmdir(this.cid, path);
+        if (result != SUCCESS) {
+            throw new FileNotFoundException("rmdir failed : " + path + " code : " + result);
+        }
+        return result;
     }
 
-    public int rename(String from, String to) {
-        return libcfs.cfs_rename(this.cid, from, to);
+    public int unlink(String path) throws FileNotFoundException {
+        int result = libcfs.cfs_unlink(this.cid, path);
+        if (result != SUCCESS) {
+            throw new FileNotFoundException("unlink failed : " + path + " code : " + result);
+        }
+        return result;
+    }
+
+    public int rename(String from, String to) throws FileNotFoundException {
+        int result = libcfs.cfs_rename(this.cid, from, to);
+        if (result != SUCCESS) {
+            throw new FileNotFoundException("rename failed: from: " + from + " to: " + to);
+        }
+        return result;
     }
 
     public int fchmod(int fd, int mode) {
         return libcfs.cfs_fchmod(this.cid, fd, mode);
     }
+
 }

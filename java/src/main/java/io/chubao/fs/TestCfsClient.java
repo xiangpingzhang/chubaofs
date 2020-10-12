@@ -2,8 +2,10 @@ package io.chubao.fs;
 
 import io.chubao.fs.CfsLibrary.Dirent;
 
+import java.io.FileNotFoundException;
+
 public class TestCfsClient {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws FileNotFoundException {
         CfsMount mnt = new CfsMount("/usr/lib/libcfs.so");
 
         mnt.setClient("volName", "ltptest");
@@ -39,7 +41,7 @@ public class TestCfsClient {
             System.out.println("uid: " + stat.uid);
             System.out.println("gid: " + stat.gid);
 
-            int fd = mnt.open(targetPath, mnt.O_RDONLY, 0644);
+            int fd = mnt.open(targetPath, CfsMount.O_RDONLY, 0644);
 
             if (fd < 0) {
                 System.out.println("Open failed: " + fd);
@@ -75,7 +77,7 @@ public class TestCfsClient {
 
             mnt.close(fd);
         } else if (args[0].equals("write")) {
-            int fd = mnt.open(targetPath, mnt.O_RDWR | mnt.O_CREAT, 0644);
+            int fd = mnt.open(targetPath, CfsMount.O_RDWR | CfsMount.O_CREAT, 0644);
 
             if (fd < 0) {
                 System.out.println("Open failed: " + fd);
@@ -90,32 +92,8 @@ public class TestCfsClient {
             System.out.println("write bytes: " + writeBytes);
 
             mnt.close(fd);
-        } else if (args[0].equals("ls")) {
-            mnt.chdir(targetPath);
-            int fd = mnt.open(".", mnt.O_RDWR, 0644);
-
-            if (fd < 0) {
-                System.out.println("Open failed: " + fd);
-                return;
-            }
-
-            int total_entry = 0;
-            Dirent dent = new Dirent();
-            Dirent[] dents = (Dirent[]) dent.toArray(2);
-            for (;;) {
-                int n = mnt.readdir(fd, dents, 2);
-                if (n <= 0) {
-                    break;
-                }
-                total_entry += n;
-                for (int i = 0; i < n; i++) {
-                    System.out.println("ino: " + dents[i].ino + " | d_type: " + dents[i].dType);
-                }
-            }
-            System.out.println("num of entries: " + total_entry);
-            mnt.close(fd);
         } else if (args[0].equals("chmod")) {
-            int fd = mnt.open(targetPath, mnt.O_RDWR, 0644);
+            int fd = mnt.open(targetPath, CfsMount.O_RDWR, 0644);
             if (fd < 0) {
                 System.out.println("Open failed: " + fd);
                 return;
@@ -130,8 +108,14 @@ public class TestCfsClient {
             ret = mnt.getAttr(targetPath, stat);
             System.out.println("mode: " + stat.mode);
             mnt.close(fd);
+        } else if (args[0].equals("ls")) {
+            Dirent[] dents= mnt.listdir(targetPath);
+            int k = 0;
+            while (k < dents.length) {
+                System.out.println("ino: " + dents[k].ino + " | d_type: " + dents[k].dType + " | d_name: " + new String(dents[k].name));
+                k++;
+            }
         }
-
         mnt.closeClient();
     }
 }
